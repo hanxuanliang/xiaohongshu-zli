@@ -24,6 +24,7 @@ from rich.table import Table
 
 from .auth import get_cookie_string, load_xsec_token, qrcode_login, save_token_cache
 from .exceptions import XhsError
+from . import __version__
 
 console = Console()
 
@@ -64,6 +65,7 @@ def _get_client():
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="xhs-cli")
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
 def cli(verbose: bool):
     """xhs — Xiaohongshu CLI tool 🍰"""
