@@ -106,10 +106,45 @@ def status():
         client = _get_client()
         info = client.get_self_info()
 
-        basic = info.get("basicInfo", info.get("basic_info", info))
-        nickname = basic.get("nickname", "Unknown")
+        # Data may come from different sources with different structures.
+        # Try multiple paths to find user details.
+        basic = info.get("basicInfo", info.get("basic_info", {}))
+        # If get_self_info returned full profile from get_user_info,
+        # userPageData contains the richest data.
+        user_page = info.get("userPageData", {})
+        if user_page:
+            basic = user_page.get("basicInfo", user_page.get("basic_info", basic))
+
+        # Also check userInfo path (from get_user_info)
+        user_info = info.get("userInfo", {})
+        if user_info and not basic:
+            basic = user_info
+
+        # If basic is still empty, fall back to top-level info dict
+        if not basic or not isinstance(basic, dict):
+            basic = info
+
+        nickname = basic.get("nickname", basic.get("nick_name", "Unknown"))
         red_id = basic.get("redId", basic.get("red_id", ""))
         ip_location = basic.get("ipLocation", basic.get("ip_location", ""))
+        desc = basic.get("desc", basic.get("description", ""))
+        gender = basic.get("gender", "")
+        user_id = basic.get("userId", basic.get("user_id", basic.get("id", "")))
+
+        # Interaction stats (fans, following, note count)
+        interactions = (user_page.get("interactions", []) or
+                        info.get("interactions", []))
+
+        # Build stats map from interactions array
+        # Each item has {type, name, count} or similar
+        stats = {}
+        if isinstance(interactions, list):
+            for item in interactions:
+                if isinstance(item, dict):
+                    name = item.get("name", item.get("type", ""))
+                    count = item.get("count", item.get("value", ""))
+                    if name and count is not None:
+                        stats[name] = str(count)
 
         table = Table(title="Login Status")
         table.add_column("Field", style="cyan")
@@ -118,11 +153,29 @@ def status():
         table.add_row("Nickname", nickname)
         if red_id:
             table.add_row("Red ID", red_id)
+        if user_id:
+            table.add_row("User ID", str(user_id))
+        if desc:
+            table.add_row("Bio", desc[:50])
         if ip_location:
             table.add_row("IP Location", ip_location)
-        console.print(table)
+        if gender:
+            gender_label = {"0": "🚹", "1": "🚺", 0: "🚹", 1: "🚺"}.get(gender, str(gender))
+            table.add_row("Gender", gender_label)
 
+        # Show stats from interactions
+        stat_labels = {
+            "fans": "Followers", "粉丝": "Followers",
+            "follows": "Following", "关注": "Following",
+            "interaction": "Likes & Favs", "获赞与收藏": "Likes & Favs",
+        }
+        for key, label in stat_labels.items():
+            if key in stats:
+                table.add_row(label, stats[key])
+
+        console.print(table)
         client.close()
+
     except SystemExit:
         raise
     except Exception as e:

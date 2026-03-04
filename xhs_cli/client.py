@@ -391,28 +391,90 @@ class XhsClient:
     # ===== Self Info =====
 
     def get_self_info(self) -> dict:
-        """Check login status by visiting user settings page."""
+        """Get current user's profile info.
+
+        Strategy:
+        1. Navigate to homepage and extract user_id from __INITIAL_STATE__
+           (checks multiple paths: user.currentUser, sidebar, etc.)
+        2. If user_id found, navigate to profile page for full info
+        3. Falls back to whatever data is available from homepage
+        """
         self._page.goto(
             "https://www.xiaohongshu.com",
             wait_until="domcontentloaded",
             timeout=15000,
         )
         self._human_wait(1, 2)
-
         self._wait_for_initial_state()
 
+        # Try to extract current user info from homepage state.
+        # The data might be in different paths depending on page version.
         result = self._page.evaluate("""() => {
-            if (window.__INITIAL_STATE__ &&
-                window.__INITIAL_STATE__.user &&
-                window.__INITIAL_STATE__.user.userPageData) {
-                return JSON.parse(JSON.stringify(
-                    window.__INITIAL_STATE__.user.userPageData
-                ));
+            function unwrap(obj, depth) {
+                if (depth > 6 || obj === null || obj === undefined) return obj;
+                if (typeof obj !== 'object') return obj;
+                if ('_value' in obj && 'dep' in obj) return unwrap(obj._value, depth + 1);
+                if ('value' in obj && 'dep' in obj) return unwrap(obj.value, depth + 1);
+                if (Array.isArray(obj)) return obj.map(item => unwrap(item, depth + 1));
+                const result = {};
+                for (const key of Object.keys(obj)) {
+                    if (key === 'dep' || key.startsWith('__')) continue;
+                    try { result[key] = unwrap(obj[key], depth + 1); } catch(e) {}
+                }
+                return result;
+            }
+
+            const state = window.__INITIAL_STATE__;
+            if (!state) return null;
+
+            // Try multiple paths where current user info might live
+            const paths = [
+                state.user && state.user.userPageData,
+                state.user && state.user.currentUser,
+                state.user && state.user.info,
+                state.user && state.user.loginUser,
+                state.sidebar && state.sidebar.user,
+                state.app && state.app.user,
+            ];
+
+            for (const p of paths) {
+                if (p) {
+                    const data = unwrap(p, 0);
+                    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                        return data;
+                    }
+                }
+            }
+
+            // Last resort: dump the entire user object for inspection
+            if (state.user) {
+                return unwrap(state.user, 0);
             }
             return null;
         }""")
 
-        return result or {}
+        if not result:
+            return {}
+
+        # Try to find user_id so we can navigate to profile for full info.
+        # user_id might be in basicInfo.userId, userId, user_id, id, etc.
+        user_id = None
+        if isinstance(result, dict):
+            basic = result.get("basicInfo", result.get("basic_info", result))
+            user_id = (basic.get("userId", "") or basic.get("user_id", "") or
+                       basic.get("id", "") or result.get("userId", "") or
+                       result.get("user_id", "") or result.get("id", ""))
+
+        # If we got a user_id, fetch their full profile page for richer data
+        if user_id:
+            try:
+                full_info = self.get_user_info(user_id)
+                if full_info:
+                    return full_info
+            except Exception:
+                pass
+
+        return result
 
     # ===== Comments via scroll =====
 
