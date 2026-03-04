@@ -1,15 +1,12 @@
 """CLI entry point for xhs-cli.
 
 Usage:
-    xhs login
-    xhs status
-    xhs search "咖啡"
-    xhs search "咖啡" --json
-    xhs read <note_id> [--xsec-token <token>] [--json]
-    xhs user <user_id> [--json]
-    xhs user-posts <user_id> [--json]
-    xhs feed [--json]
-    xhs topics <keyword> [--json]
+    xhs login / logout / status / whoami
+    xhs search / read / feed / topics
+    xhs user / user-posts / followers / following
+    xhs like / unlike / comment
+    xhs favorite / unfavorite / favorites
+    xhs post
 """
 
 from __future__ import annotations
@@ -17,13 +14,21 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from typing import Optional, Tuple
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from .auth import clear_cookies, get_cookie_string, load_xsec_token, qrcode_login, save_token_cache
-from .exceptions import XhsError
+from .auth import (
+    clear_cookies,
+    cookie_str_to_dict,
+    get_cookie_string,
+    load_xsec_token,
+    qrcode_login,
+    save_token_cache,
+)
+from .exceptions import LoginError
 from . import __version__
 
 console = Console()
@@ -38,17 +43,6 @@ def _setup_logging(verbose: bool):
     )
 
 
-def _parse_cookie_dict(cookie: str) -> dict[str, str]:
-    """Parse cookie string into dict."""
-    result = {}
-    for item in cookie.split(";"):
-        item = item.strip()
-        if "=" in item:
-            k, v = item.split("=", 1)
-            result[k.strip()] = v.strip()
-    return result
-
-
 def _get_client():
     """Create an authenticated browser-based XhsClient."""
     from .client import XhsClient
@@ -58,7 +52,7 @@ def _get_client():
         console.print("[red]Not logged in. Run `xhs login` first.[/red]")
         sys.exit(1)
 
-    cookie_dict = _parse_cookie_dict(cookie)
+    cookie_dict = cookie_str_to_dict(cookie)
     client = XhsClient(cookie_dict)
     client.start()
     return client
@@ -77,9 +71,13 @@ def cli(verbose: bool):
 @cli.command()
 @click.option("--qrcode", is_flag=True, help="Force QR code login")
 @click.option("--cookie", "cookie_str", default=None, help="Manually provide cookie string")
-def login(qrcode: bool, cookie_str: str | None):
+def login(qrcode: bool, cookie_str: Optional[str]):
     """Login to Xiaohongshu."""
     if cookie_str:
+        # Basic validation: must contain 'a1=' at minimum
+        if "a1=" not in cookie_str:
+            console.print("[red]❌ Invalid cookie string. Must contain at least 'a1=...'.[/red]")
+            sys.exit(1)
         from .auth import save_cookies
         save_cookies(cookie_str)
         console.print("[green]✅ Cookie saved![/green]")
@@ -89,7 +87,7 @@ def login(qrcode: bool, cookie_str: str | None):
         cookie = get_cookie_string()
         if cookie:
             # Validate by actually loading the page and checking user data
-            cookie_dict = _parse_cookie_dict(cookie)
+            cookie_dict = cookie_str_to_dict(cookie)
             if _verify_cookies(cookie_dict):
                 console.print("[green]✅ Logged in (from browser cookies)[/green]")
                 return
@@ -108,7 +106,7 @@ def login(qrcode: bool, cookie_str: str | None):
         sys.exit(1)
 
 
-def _verify_cookies(cookie_dict: dict[str, str]) -> bool:
+def _verify_cookies(cookie_dict: dict) -> bool:
     """Quick check: load homepage with cookies and see if we get a valid user.
 
     Returns True if the session is valid (has a real user), False otherwise.
@@ -809,7 +807,7 @@ def favorites(max_count: int, as_json: bool):
 @click.option("--image", "images", multiple=True, required=True,
               type=click.Path(exists=True), help="Image file to upload (can be repeated)")
 @click.option("--content", default="", help="Note body/description text")
-def post(title: str, images: tuple[str, ...], content: str):
+def post(title: str, images: Tuple[str, ...], content: str):
     """Publish a new image note.
 
     \b

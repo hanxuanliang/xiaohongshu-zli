@@ -40,3 +40,12 @@ Issues = "https://github.com/jackwener/xhs-cli/issues"
 
 [project.scripts]
 xhs = "xhs_cli.cli:cli"
+
+[dependency-groups]
+dev = ["pytest>=8.3.5"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires valid login session (deselect with '-m \"not integration\"')",
+]
+addopts = "-m 'not integration'"

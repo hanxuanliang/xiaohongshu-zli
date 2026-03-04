@@ -14,19 +14,50 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Shared JavaScript function to unwrap Vue reactive refs from __INITIAL_STATE__.
+# Vue wraps values in reactive Proxy objects with _value/dep structure.
+UNWRAP_JS = """
+function unwrap(obj, depth) {
+    if (depth > 6 || obj === null || obj === undefined) return obj;
+    if (typeof obj !== 'object') return obj;
+    if ('_value' in obj && 'dep' in obj) return unwrap(obj._value, depth + 1);
+    if ('value' in obj && 'dep' in obj) return unwrap(obj.value, depth + 1);
+    if (Array.isArray(obj)) return obj.map(item => unwrap(item, depth + 1));
+    const result = {};
+    for (const key of Object.keys(obj)) {
+        if (key === 'dep' || key.startsWith('__')) continue;
+        try { result[key] = unwrap(obj[key], depth + 1); } catch(e) {}
+    }
+    return result;
+}
+""".strip()
+
 
 class XhsClient:
     """Camoufox-based Xiaohongshu client.
 
     Navigates to real pages and extracts data from __INITIAL_STATE__,
     indistinguishable from a real user browsing.
+
+    Can be used as a context manager:
+        with XhsClient(cookie_dict) as client:
+            client.start()
+            ...
     """
 
-    def __init__(self, cookie_dict: dict[str, str]):
+    def __init__(self, cookie_dict: dict):
         self._cookie_dict = cookie_dict
         self._camoufox_ctx = None
         self._browser = None
         self._page = None
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
     def start(self):
         """Launch camoufox and inject cookies."""

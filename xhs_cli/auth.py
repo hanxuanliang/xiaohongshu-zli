@@ -304,7 +304,7 @@ def save_cookies(cookie_str: str):
     """Save cookies to config file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    cookies = _cookie_str_to_dict(cookie_str)
+    cookies = cookie_str_to_dict(cookie_str)
     data = {"cookies": cookies}
 
     COOKIE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
@@ -332,7 +332,11 @@ def _dict_to_cookie_str(cookies: dict) -> str:
     return "; ".join(f"{k}={v}" for k, v in cookies.items())
 
 
-def _cookie_str_to_dict(cookie_str: str) -> dict:
+def cookie_str_to_dict(cookie_str: str) -> dict:
+    """Parse a cookie header string into a dict.
+
+    Example: "a1=xxx; web_session=yyy" -> {"a1": "xxx", "web_session": "yyy"}
+    """
     result = {}
     for item in cookie_str.split(";"):
         item = item.strip()
