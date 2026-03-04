@@ -1,0 +1,319 @@
+"""CLI entry point for xhs-cli.
+
+Usage:
+    xhs login
+    xhs status
+    xhs search "咖啡"
+    xhs search "咖啡" --json
+    xhs note <note_id> [--xsec-token <token>] [--json]
+    xhs warmup
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+
+import click
+from rich.console import Console
+from rich.table import Table
+
+from .auth import get_cookie_string, qrcode_login
+from .exceptions import XhsError
+
+console = Console()
+
+
+def _setup_logging(verbose: bool):
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def _parse_cookie_dict(cookie: str) -> dict[str, str]:
+    """Parse cookie string into dict."""
+    result = {}
+    for item in cookie.split(";"):
+        item = item.strip()
+        if "=" in item:
+            k, v = item.split("=", 1)
+            result[k.strip()] = v.strip()
+    return result
+
+
+def _get_client():
+    """Create an authenticated browser-based XhsClient."""
+    from .client import XhsClient
+
+    cookie = get_cookie_string()
+    if not cookie:
+        console.print("[red]Not logged in. Run `xhs login` first.[/red]")
+        sys.exit(1)
+
+    cookie_dict = _parse_cookie_dict(cookie)
+    client = XhsClient(cookie_dict)
+    client.start()
+    return client
+
+
+@click.group()
+@click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
+def cli(verbose: bool):
+    """xhs — Xiaohongshu CLI tool 🍰"""
+    _setup_logging(verbose)
+
+
+# ===== Login =====
+
+@cli.command()
+@click.option("--qrcode", is_flag=True, help="Force QR code login")
+@click.option("--cookie", "cookie_str", default=None, help="Manually provide cookie string")
+def login(qrcode: bool, cookie_str: str | None):
+    """Login to Xiaohongshu."""
+    if cookie_str:
+        from .auth import save_cookies
+        save_cookies(cookie_str)
+        console.print("[green]✅ Cookie saved![/green]")
+        return
+
+    if not qrcode:
+        cookie = get_cookie_string()
+        if cookie:
+            # Quick verify: try loading homepage + extracting __INITIAL_STATE__
+            console.print(f"[green]✅ Logged in (from browser cookies)[/green]")
+            return
+
+    # QR code login
+    try:
+        cookie = qrcode_login()
+        console.print("[green]✅ Login successful! Cookie saved.[/green]")
+    except Exception as e:
+        console.print(f"[red]❌ Login failed: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+def status():
+    """Check login status."""
+    try:
+        client = _get_client()
+        info = client.get_self_info()
+
+        basic = info.get("basicInfo", info.get("basic_info", info))
+        nickname = basic.get("nickname", "Unknown")
+        red_id = basic.get("redId", basic.get("red_id", ""))
+        ip_location = basic.get("ipLocation", basic.get("ip_location", ""))
+
+        table = Table(title="Login Status")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Status", "✅ Logged in")
+        table.add_row("Nickname", nickname)
+        if red_id:
+            table.add_row("Red ID", red_id)
+        if ip_location:
+            table.add_row("IP Location", ip_location)
+        console.print(table)
+
+        client.close()
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]❌ Not logged in or session expired: {e}[/red]")
+        sys.exit(1)
+
+
+# ===== Search =====
+
+@cli.command()
+@click.argument("keyword")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def search(keyword: str, as_json: bool):
+    """Search notes by keyword."""
+    try:
+        client = _get_client()
+        feeds = client.search_notes(keyword)
+
+        if as_json:
+            click.echo(json.dumps(feeds, indent=2, ensure_ascii=False))
+            client.close()
+            return
+
+        if not feeds:
+            console.print("[yellow]No results found.[/yellow]")
+            client.close()
+            return
+
+        table = Table(title=f"Search: {keyword} ({len(feeds)} results)")
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Title", style="cyan", max_width=40)
+        table.add_column("Author", style="green", max_width=15)
+        table.add_column("Likes", style="red", justify="right")
+        table.add_column("Note ID", style="dim")
+        table.add_column("xsec_token", style="dim", max_width=20)
+
+        for i, item in enumerate(feeds, 1):
+            card = item.get("note_card", item.get("noteCard", {}))
+            user = card.get("user", {})
+            interact = card.get("interact_info", card.get("interactInfo", {}))
+            note_id = item.get("id", "")
+            xsec = item.get("xsec_token", item.get("xsecToken", ""))
+            table.add_row(
+                str(i),
+                card.get("display_title", card.get("displayTitle", ""))[:40],
+                user.get("nickname", user.get("nick_name", ""))[:15],
+                str(interact.get("liked_count", interact.get("likedCount", "0"))),
+                note_id,
+                xsec[:20] if xsec else "",
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Use `xhs note <Note ID> --xsec-token <token>` to view details[/dim]")
+        client.close()
+
+    except Exception as e:
+        console.print(f"[red]❌ Search failed: {e}[/red]")
+        sys.exit(1)
+
+
+# ===== Note Detail =====
+
+@cli.command()
+@click.argument("note_id")
+@click.option("--xsec-token", default="", help="xsec_token from search results")
+@click.option("--comments", is_flag=True, help="Include comments")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def note(note_id: str, xsec_token: str, comments: bool, as_json: bool):
+    """Get note detail by ID."""
+    try:
+        client = _get_client()
+        detail = client.get_note_detail(note_id, xsec_token)
+
+        output = {"note": detail.get("note", detail)}
+
+        if comments:
+            output["comments"] = client.get_note_comments(note_id, xsec_token)
+
+        if as_json:
+            click.echo(json.dumps(output, indent=2, ensure_ascii=False))
+            client.close()
+            return
+
+        note_data = output["note"]
+        interact = note_data.get("interactInfo", note_data.get("interact_info", {}))
+        user = note_data.get("user", {})
+        console.print(f"\n[bold cyan]{note_data.get('title', 'Untitled')}[/bold cyan]")
+        console.print(f"[dim]by {user.get('nickname', '')} · {note_data.get('ipLocation', note_data.get('ip_location', ''))}[/dim]")
+        console.print(f"\n{note_data.get('desc', '')}")
+        console.print(f"\n❤️  {interact.get('likedCount', interact.get('liked_count', 0))}  "
+                       f"⭐ {interact.get('collectedCount', interact.get('collected_count', 0))}  "
+                       f"💬 {interact.get('commentCount', interact.get('comment_count', 0))}  "
+                       f"🔗 {interact.get('shareCount', interact.get('share_count', 0))}")
+
+        if "comments" in output and output["comments"]:
+            clist = output["comments"]
+            if isinstance(clist, dict):
+                clist = clist.get("comments", [])
+            console.print(f"\n[bold]Comments ({len(clist)}):[/bold]")
+            for c in clist[:20]:
+                u = c.get("userInfo", c.get("user_info", {}))
+                console.print(f"  [green]{u.get('nickname', '')}[/green]: {c.get('content', '')}")
+
+        client.close()
+
+    except Exception as e:
+        console.print(f"[red]❌ Failed to get note: {e}[/red]")
+        sys.exit(1)
+
+
+# ===== User =====
+
+@cli.command()
+@click.argument("user_id")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def user(user_id: str, as_json: bool):
+    """Get user profile."""
+    try:
+        client = _get_client()
+        info = client.get_user_info(user_id)
+
+        if as_json:
+            click.echo(json.dumps(info, indent=2, ensure_ascii=False))
+        else:
+            console.print_json(json.dumps(info, ensure_ascii=False))
+
+        client.close()
+
+    except Exception as e:
+        console.print(f"[red]❌ Failed to get user: {e}[/red]")
+        sys.exit(1)
+
+
+# ===== Interactions =====
+
+@cli.command()
+@click.argument("note_id")
+@click.option("--xsec-token", default="", help="xsec_token from search results")
+@click.option("--undo", is_flag=True, help="Unlike instead of like")
+def like(note_id: str, xsec_token: str, undo: bool):
+    """Like or unlike a note."""
+    try:
+        client = _get_client()
+        if undo:
+            client.unlike_note(note_id, xsec_token)
+            console.print(f"[green]✅ Unliked {note_id}[/green]")
+        else:
+            client.like_note(note_id, xsec_token)
+            console.print(f"[green]✅ Liked {note_id}[/green]")
+        client.close()
+    except Exception as e:
+        console.print(f"[red]❌ Like failed: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("note_id")
+@click.option("--xsec-token", default="", help="xsec_token from search results")
+@click.option("--undo", is_flag=True, help="Unfavorite instead of favorite")
+def favorite(note_id: str, xsec_token: str, undo: bool):
+    """Favorite or unfavorite a note."""
+    try:
+        client = _get_client()
+        if undo:
+            client.unfavorite_note(note_id, xsec_token)
+            console.print(f"[green]✅ Unfavorited {note_id}[/green]")
+        else:
+            client.favorite_note(note_id, xsec_token)
+            console.print(f"[green]✅ Favorited {note_id}[/green]")
+        client.close()
+    except Exception as e:
+        console.print(f"[red]❌ Favorite failed: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("note_id")
+@click.argument("content")
+@click.option("--xsec-token", default="", help="xsec_token from search results")
+def comment(note_id: str, content: str, xsec_token: str):
+    """Post a comment on a note."""
+    try:
+        client = _get_client()
+        ok = client.post_comment(note_id, content, xsec_token)
+        if ok:
+            console.print(f"[green]✅ Comment posted on {note_id}[/green]")
+        else:
+            console.print(f"[red]❌ Comment failed[/red]")
+        client.close()
+    except Exception as e:
+        console.print(f"[red]❌ Comment failed: {e}[/red]")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    cli()
+

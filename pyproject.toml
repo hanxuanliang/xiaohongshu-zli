@@ -1,0 +1,17 @@
+[project]
+name = "xhs-cli"
+version = "0.1.0"
+description = "A CLI for Xiaohongshu (小红书) — search, read notes, view profiles"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "camoufox[geoip]>=0.4",
+    "playwright>=1.40",
+    "browser-cookie3>=0.19",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+xhs = "xhs_cli.cli:cli"
