@@ -149,14 +149,35 @@ def qrcode_login() -> str:
         page.goto("https://www.xiaohongshu.com", wait_until="domcontentloaded", timeout=20000)
         time.sleep(3)
 
-        # Click login button to trigger QR code modal
+        # Dismiss any overlay/mask that might block clicks (cookie consent, etc.)
+        for mask_sel in ['.reds-mask', '[aria-label="弹窗遮罩"]', '.close-button', '.reds-popup-close']:
+            mask = page.query_selector(mask_sel)
+            if mask:
+                try:
+                    mask.click(force=True)
+                    time.sleep(1)
+                except Exception:
+                    pass
+
+        # Try clicking login button with force=True to bypass any remaining overlays
         login_btn = (
             page.query_selector('.login-btn') or
             page.query_selector('[class*="login"]') or
             page.query_selector('button:has-text("登录")')
         )
         if login_btn:
-            login_btn.click()
+            try:
+                login_btn.click(force=True)
+                time.sleep(3)
+            except Exception:
+                # If click still fails, navigate directly to login page
+                logger.debug("Login button click failed, trying direct navigation")
+                pass
+
+        # If no QR code visible yet, try navigating directly to the login URL
+        qr_visible = page.query_selector('.qrcode-img') or page.query_selector('img[class*="qrcode"]')
+        if not qr_visible:
+            page.goto("https://www.xiaohongshu.com/login", wait_until="domcontentloaded", timeout=20000)
             time.sleep(3)
 
         # Try to screenshot the QR code element directly
