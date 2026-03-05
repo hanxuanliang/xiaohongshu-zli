@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from click.testing import CliRunner
 
+import xhs_cli.cli as cli_module
 from xhs_cli.cli import cli
 
 
@@ -67,9 +68,15 @@ class TestLoginCookieValidation:
         assert result.exit_code == 1
         assert "Invalid cookie" in result.output
 
-    def test_login_empty_cookie(self, runner, tmp_config_dir):
+    def test_login_empty_cookie(self, runner, tmp_config_dir, monkeypatch):
+        monkeypatch.setattr(
+            cli_module,
+            "qrcode_login",
+            lambda: pytest.fail("qrcode_login should not be called for empty --cookie"),
+        )
         result = runner.invoke(cli, ["login", "--cookie", ""])
         assert result.exit_code == 1
+        assert "Invalid cookie" in result.output
 
 
 class TestLogout:
