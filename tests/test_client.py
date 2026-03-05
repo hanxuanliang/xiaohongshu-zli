@@ -61,12 +61,22 @@ class TestPublishResultHeuristic:
         assert XhsClient._is_publish_success("发布成功", "https://creator.xiaohongshu.com/publish/publish")
 
     def test_success_when_redirected_away_from_publish_url(self):
-        assert XhsClient._is_publish_success("", "https://creator.xiaohongshu.com/note/123")
+        assert XhsClient._is_publish_success(
+            "",
+            "https://creator.xiaohongshu.com/note/123",
+            "123",
+        )
 
     def test_failure_when_no_success_signal_and_still_on_publish_page(self):
         assert not XhsClient._is_publish_success(
             "",
             "https://creator.xiaohongshu.com/publish/publish",
+        )
+
+    def test_failure_when_redirected_without_publish_signal_or_note_id(self):
+        assert not XhsClient._is_publish_success(
+            "",
+            "https://creator.xiaohongshu.com/login",
         )
 
     def test_extract_note_id_from_explore_url(self):

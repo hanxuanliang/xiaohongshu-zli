@@ -21,7 +21,7 @@ A command-line tool for [Xiaohongshu (小红书)](https://www.xiaohongshu.com) �
 - **Topics** — search for topics and hashtags
 - **Engage** — like/unlike, favorite/unfavorite, comment, delete
 - **Post** — publish image notes
-- **Auth** — auto-extract cookies from Chrome, or login via QR code
+- **Auth** — auto-extract cookies from Chrome, or login via QR code (terminal-rendered)
 - **JSON output** — `--json` flag for all data commands
 - **Auto token** — `xsec_token` is cached and auto-resolved
 
@@ -100,7 +100,10 @@ XHS_SMOKE_POST_CONTENT="smoke content"
 # Auto-extract cookies from Chrome (recommended)
 xhs login
 
-# Or provide cookie string manually
+# Force QR code login (useful for troubleshooting auth)
+xhs login --qrcode
+
+# Or provide cookie string manually (must include a1 and web_session)
 xhs login --cookie "a1=xxx; web_session=yyy"
 
 # Quick check for saved login session
@@ -205,11 +208,12 @@ Uses [camoufox](https://github.com/daijro/camoufox) (anti-fingerprint Firefox) t
 
 ## How It Works
 
-1. **Authentication** — First reads `~/.xhs-cli/cookies.json`; if missing, extracts cookies from local Chrome via browser-cookie3. Falls back to QR code login if extraction fails.
-2. **Browsing** — Each operation navigates to real pages using camoufox, making all traffic look like normal user browsing.
-3. **Data Extraction** — Structured data is pulled from `window.__INITIAL_STATE__`.
-4. **Token Caching** — After search/feed, `xsec_token` is auto-cached to `~/.xhs-cli/token_cache.json`.
-5. **Interactions** — Like, favorite, and comment work by clicking actual DOM buttons.
+1. **Authentication** — First reads `~/.xhs-cli/cookies.json`; if missing, extracts cookies from local Chrome via browser-cookie3. Falls back to QR code login if extraction fails (terminal half-block rendering with `▀ ▄ █`).
+2. **Session Validation** — After login, the CLI verifies that the session is non-guest and probes feed/search usability. If probe fails, it asks for re-login.
+3. **Browsing** — Each operation navigates to real pages using camoufox, making all traffic look like normal user browsing.
+4. **Data Extraction** — Structured data is pulled from `window.__INITIAL_STATE__`.
+5. **Token Caching** — After search/feed, `xsec_token` is auto-cached to `~/.xhs-cli/token_cache.json`.
+6. **Interactions** — Like, favorite, and comment work by clicking actual DOM buttons.
 
 ## Use as AI Agent Skill
 
@@ -243,6 +247,8 @@ All xhs-cli commands are available in OpenClaw after installation.
 
 - Cookies are stored in `~/.xhs-cli/cookies.json` with `0600` permissions.
 - `xhs status` checks saved local cookies only and never triggers browser extraction.
+- `xhs login --cookie` requires at least `a1` and `web_session`.
+- Login runs a usability probe; guest/risk-limited sessions are treated as invalid and require re-login.
 - `xhs post` may require an extra creator-platform login at `https://creator.xiaohongshu.com`.
 - Uses headless Firefox via camoufox — no browser window is shown.
 - First run requires downloading the camoufox browser (`python -m camoufox fetch`).

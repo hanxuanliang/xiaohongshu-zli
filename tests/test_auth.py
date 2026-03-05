@@ -9,6 +9,8 @@ import stat
 from xhs_cli.auth import (
     _dict_to_cookie_str,
     _has_required_cookies,
+    _is_likely_qr_url,
+    _render_qr_half_blocks,
     clear_cookies,
     cookie_str_to_dict,
     get_cookie_string,
@@ -64,11 +66,14 @@ class TestDictToCookieStr:
 
 
 class TestHasRequiredCookies:
-    def test_has_a1(self):
-        assert _has_required_cookies({"a1": "val", "other": "x"})
+    def test_has_a1_and_web_session(self):
+        assert _has_required_cookies({"a1": "val", "web_session": "sess", "other": "x"})
 
     def test_missing_a1(self):
         assert not _has_required_cookies({"web_session": "val"})
+
+    def test_missing_web_session(self):
+        assert not _has_required_cookies({"a1": "val"})
 
     def test_empty(self):
         assert not _has_required_cookies({})
@@ -110,6 +115,24 @@ class TestSaveAndLoadCookies:
         assert loaded is not None
         parsed = cookie_str_to_dict(loaded)
         assert parsed["a1"] == "abc123"
+
+    def test_save_cookies_handles_chmod_oserror(
+        self,
+        tmp_config_dir,
+        sample_cookie_str,
+        monkeypatch,
+    ):
+        from pathlib import Path
+
+        def _chmod_with_failure(path_obj: Path, mode: int):
+            if path_obj.name == "cookies.json":
+                raise OSError("chmod not supported")
+            return None
+
+        monkeypatch.setattr(Path, "chmod", _chmod_with_failure)
+        save_cookies(sample_cookie_str)
+        cookie_file = tmp_config_dir / "cookies.json"
+        assert cookie_file.exists()
 
 
 class TestClearCookies:
@@ -155,3 +178,36 @@ class TestTokenCache:
         token_file = tmp_config_dir / "token_cache.json"
         mode = stat.S_IMODE(os.stat(token_file).st_mode)
         assert mode == 0o600
+
+
+class TestQrHalfBlockRender:
+    def test_empty_matrix(self):
+        assert _render_qr_half_blocks([]) == ""
+
+    def test_block_character_mapping(self):
+        matrix = [
+            [True, False],
+            [True, False],
+        ]
+        rendered = _render_qr_half_blocks(matrix)
+        assert "█" in rendered
+
+    def test_half_block_top_and_bottom(self):
+        top_only = [
+            [True],
+            [False],
+        ]
+        bottom_only = [
+            [False],
+            [True],
+        ]
+        assert "▀" in _render_qr_half_blocks(top_only)
+        assert "▄" in _render_qr_half_blocks(bottom_only)
+
+
+class TestQrUrlHeuristic:
+    def test_accepts_qr_login_url(self):
+        assert _is_likely_qr_url("https://example.com/qrlogin?qrcode=abc")
+
+    def test_rejects_homepage_url(self):
+        assert not _is_likely_qr_url("https://www.xiaohongshu.com/")

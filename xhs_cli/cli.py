@@ -32,6 +32,7 @@ from .auth import (
     qrcode_login,
     save_token_cache,
 )
+from .exceptions import DataFetchError
 
 if TYPE_CHECKING:
     from .client import XhsClient
@@ -85,9 +86,16 @@ def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
         ctx.get_parameter_source("cookie_str") == ParameterSource.COMMANDLINE
     )
     if cookie_provided:
-        # Basic validation: must contain 'a1=' at minimum
-        if not cookie_str or "a1=" not in cookie_str:
-            console.print("[red]❌ Invalid cookie string. Must contain at least 'a1=...'.[/red]")
+        # Basic validation: require both a1 and web_session for a usable session.
+        if (
+            not cookie_str
+            or "a1=" not in cookie_str
+            or "web_session=" not in cookie_str
+        ):
+            console.print(
+                "[red]❌ Invalid cookie string. Must contain at least "
+                "'a1=...' and 'web_session=...'.[/red]"
+            )
             sys.exit(1)
         from .auth import save_cookies
         save_cookies(cookie_str)
@@ -101,9 +109,23 @@ def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
             cookie_dict = cookie_str_to_dict(cookie)
             verify_result = _verify_cookies(cookie_dict)
             if verify_result is True:
-                console.print("[green]✅ Logged in (from browser cookies)[/green]")
-                return
-            if verify_result is False:
+                probe_result = _probe_session_usability(cookie_dict)
+                if probe_result is True:
+                    console.print("[green]✅ Logged in (from browser cookies)[/green]")
+                    return
+                if probe_result is False:
+                    console.print(
+                        "[yellow]⚠️  Found cookies but session cannot access feed/search. "
+                        "Refreshing login...[/yellow]"
+                    )
+                    clear_cookies()
+                else:
+                    console.print(
+                        "[yellow]⚠️  Cookie verification passed but usability probe "
+                        "is inconclusive. Keeping existing local session.[/yellow]"
+                    )
+                    return
+            elif verify_result is False:
                 console.print("[yellow]⚠️  Found cookies but session is invalid/expired.[/yellow]")
                 # Clear stale cookies so they don't get reused
                 clear_cookies()
@@ -112,11 +134,21 @@ def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
                     "[yellow]⚠️  Unable to verify cookies due to a transient error. "
                     "Keeping existing local session.[/yellow]"
                 )
+                return
 
     # QR code login
     console.print("[dim]Falling back to QR code login...[/dim]")
     try:
         cookie = qrcode_login()
+        cookie_dict = cookie_str_to_dict(cookie)
+        probe_result = _probe_session_usability(cookie_dict)
+        if probe_result is False:
+            clear_cookies()
+            console.print(
+                "[red]❌ Login completed but session is still limited (guest/risk page). "
+                "Please retry login from a normal residential network.[/red]"
+            )
+            sys.exit(1)
         console.print("[green]✅ Login successful! Cookie saved.[/green]")
     except Exception as e:
         console.print(f"[red]❌ Login failed: {e}[/red]")
@@ -153,9 +185,34 @@ def _verify_cookies(cookie_dict: dict) -> bool | None:
 
     nickname = basic.get("nickname", basic.get("nick_name", ""))
     user_id = basic.get("userId", basic.get("user_id", basic.get("id", "")))
+    user_info = info.get("userInfo", {})
+    is_guest = (
+        isinstance(user_info, dict)
+        and bool(user_info.get("guest", False))
+    )
+    if is_guest:
+        return False
     if nickname and nickname != "Unknown":
         return True
     if user_id:
+        return True
+    return False
+
+
+def _probe_session_usability(cookie_dict: dict) -> bool | None:
+    """Probe whether session can access key data pages (feed/search)."""
+    from .client import XhsClient
+
+    try:
+        with XhsClient(cookie_dict) as client:
+            feeds = client.get_feed()
+    except DataFetchError:
+        return False
+    except Exception as exc:
+        logger.warning("Session usability probe failed due to transient error: %s", exc)
+        return None
+
+    if isinstance(feeds, list):
         return True
     return False
 
@@ -189,10 +246,6 @@ def whoami(as_json: bool):
     try:
         with _get_client() as client:
             info = client.get_self_info()
-
-            if as_json:
-                click.echo(json.dumps(info, indent=2, ensure_ascii=False))
-                return
 
             # Extract user details from various data paths
             basic = info.get("basicInfo", info.get("basic_info", {}))
@@ -232,6 +285,16 @@ def whoami(as_json: bool):
                     "Run `xhs login` to re-authenticate.[/red]"
                 )
                 sys.exit(1)
+
+            if as_json:
+                payload = info if isinstance(info, dict) else {"data": info}
+                if isinstance(payload, dict):
+                    if user_id:
+                        payload.setdefault("userId", str(user_id))
+                    if nickname:
+                        payload.setdefault("nickname", str(nickname))
+                click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+                return
 
             red_id = basic.get("redId", basic.get("red_id", ""))
             ip_location = basic.get("ipLocation", basic.get("ip_location", ""))

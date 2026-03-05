@@ -61,18 +61,26 @@ class XhsClient:
         return False
 
     @staticmethod
-    def _is_publish_success(page_text: str, current_url: str) -> bool:
+    def _is_publish_success(page_text: str, current_url: str, note_id: str = "") -> bool:
         """Heuristic to determine whether publish action succeeded."""
         success_indicators = [
             "发布成功",
             "已发布",
             "publish-success",
             "published",
+            "success",
         ]
         normalized = (page_text or "").lower()
         if any(indicator.lower() in normalized for indicator in success_indicators):
             return True
-        return "publish" not in (current_url or "").lower()
+        url = (current_url or "").lower()
+        if "publish" in url:
+            return False
+        if note_id and note_id.lower() in url:
+            return True
+        if re.search(r"/notes?/([a-zA-Z0-9]+)", url):
+            return True
+        return False
 
     @staticmethod
     def _extract_note_id_from_url(url: str) -> str:
@@ -172,6 +180,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="search.feeds",
+            raise_on_timeout=True,
         )
 
         # Extract search feeds
@@ -215,6 +224,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="note.noteDetailMap",
+            raise_on_timeout=True,
         )
 
         # Extract note detail
@@ -260,6 +270,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="user (profile)",
+            raise_on_timeout=True,
         )
 
         # Vue wraps values in reactive refs like {_value, dep, ...}
@@ -314,6 +325,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="user (follow list)",
+            raise_on_timeout=True,
         )
 
         result = self._page.evaluate(
@@ -381,6 +393,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="user.notes",
+            raise_on_timeout=True,
         )
 
         # Extract notes list from user profile state.
@@ -440,6 +453,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="feed.feeds",
+            raise_on_timeout=True,
         )
         # Extract feed from explore page state
         result = self._page.evaluate(
@@ -511,6 +525,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="search.topics",
+            raise_on_timeout=True,
         )
 
         # Extract topic search results
@@ -594,6 +609,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="user (favorites)",
+            raise_on_timeout=True,
         )
 
         all_notes = []
@@ -636,7 +652,7 @@ class XhsClient:
                         const author = card.querySelector('[class*="author"]');
                         const likes = card.querySelector('[class*="like"]');
                         return {
-                            noteId: (href.match(/\\/explore\\/([a-f0-9]+)/) || [])[1] || '',
+                            noteId: (href.match(/\\/explore\\/([a-zA-Z0-9]+)/) || [])[1] || '',
                             displayTitle: title ? title.textContent.trim() : '',
                             user: { nickname: author ? author.textContent.trim() : '' },
                             interactInfo: { likedCount: likes ? likes.textContent.trim() : '' },
@@ -695,6 +711,7 @@ class XhsClient:
             }""",
             timeout=10.0,
             desc="user info",
+            raise_on_timeout=True,
         )
 
         # Try to extract current user info from homepage state.
@@ -832,6 +849,7 @@ class XhsClient:
     def post_comment(self, note_id: str, content: str, xsec_token: str = "") -> bool:
         """Post a comment on a note by typing into the comment input."""
         self._navigate_to_note(note_id, xsec_token)
+        before_count = self._get_comment_count(note_id)
 
         # Find and click comment input
         try:
@@ -852,18 +870,74 @@ class XhsClient:
             if submit:
                 submit.click()
                 self._human_wait(1, 2)
-                logger.info("Comment posted on %s", note_id)
-                return True
+                if self._verify_comment_submitted(note_id, before_count):
+                    logger.info("Comment posted on %s", note_id)
+                    return True
 
             # Try pressing Enter as fallback
             self._page.keyboard.press("Enter")
             self._human_wait(1, 2)
-            logger.info("Comment posted (Enter) on %s", note_id)
-            return True
+            if self._verify_comment_submitted(note_id, before_count):
+                logger.info("Comment posted (Enter) on %s", note_id)
+                return True
+            logger.warning("Comment submit attempted but no success signal found for %s", note_id)
+            return False
 
         except Exception as e:
             logger.error("Failed to post comment: %s", e)
             return False
+
+    def _get_comment_count(self, note_id: str) -> int:
+        """Best-effort extraction of current comment count for a note."""
+        try:
+            count = self._page.evaluate("""(noteId) => {
+                const s = window.__INITIAL_STATE__;
+                if (!s || !s.note || !s.note.noteDetailMap) return -1;
+                const map = s.note.noteDetailMap;
+                const detail = map[noteId] || map[Object.keys(map)[0]];
+                if (!detail) return -1;
+                const note = detail.note || {};
+                const interactInfo = note.interactInfo || {};
+                const interactInfoSnake = note.interact_info || {};
+                const candidates = [
+                    interactInfo.commentCount,
+                    interactInfoSnake.comment_count,
+                ];
+                for (const c of candidates) {
+                    if (typeof c === 'number') return c;
+                    if (typeof c === 'string' && c.trim()) {
+                        const v = Number(c);
+                        if (!Number.isNaN(v)) return v;
+                    }
+                }
+                const comments = detail.comments;
+                if (Array.isArray(comments)) return comments.length;
+                if (comments && Array.isArray(comments.list)) return comments.list.length;
+                if (comments && Array.isArray(comments.comments)) return comments.comments.length;
+                return -1;
+            }""", note_id)
+            if isinstance(count, (int, float)):
+                return int(count)
+        except Exception:
+            pass
+        return -1
+
+    def _verify_comment_submitted(self, note_id: str, before_count: int) -> bool:
+        """Check whether comment submit succeeded."""
+        # A visible success toast/message is the strongest signal.
+        try:
+            body_text = (self._page.text_content("body") or "").strip()
+        except Exception:
+            body_text = ""
+        success_tokens = ("评论成功", "发布成功", "发送成功", "success")
+        if body_text and any(token in body_text.lower() for token in success_tokens):
+            return True
+
+        # Fallback: comment count increased.
+        after_count = self._get_comment_count(note_id)
+        if before_count >= 0 and after_count >= 0 and after_count > before_count:
+            return True
+        return False
 
     # ===== Publish Note =====
 
@@ -1074,7 +1148,7 @@ class XhsClient:
                     self._extract_note_id_from_url(current_url)
                     or self._extract_note_id_from_page()
                 )
-                if self._is_publish_success(page_text, current_url):
+                if self._is_publish_success(page_text, current_url, note_id):
                     logger.info("Note published successfully. Current URL: %s", current_url)
                     if return_detail:
                         return {"success": True, "note_id": note_id, "url": current_url}
@@ -1167,12 +1241,39 @@ class XhsClient:
         if "删除成功" in page_text or "已删除" in page_text:
             return True
 
-        # If note page redirects away from the current note, treat as success.
-        current_url = self._page.url
-        if note_id and note_id not in current_url:
+        if "删除失败" in page_text or "操作失败" in page_text:
+            return False
+
+        if self._verify_note_deleted(note_id, xsec_token):
             return True
 
         return False
+
+    def _verify_note_deleted(self, note_id: str, xsec_token: str = "") -> bool:
+        """Re-open the note page and verify the note is no longer available."""
+        url = f"https://www.xiaohongshu.com/explore/{note_id}"
+        if xsec_token:
+            url += f"?xsec_token={xsec_token}&xsec_source=pc_feed"
+        try:
+            self._page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            self._human_wait(1, 2)
+            exists = self._page.evaluate("""(targetNoteId) => {
+                const s = window.__INITIAL_STATE__;
+                if (!s || !s.note || !s.note.noteDetailMap) return false;
+                const map = s.note.noteDetailMap;
+                if (!map || Object.keys(map).length === 0) return false;
+                if (map[targetNoteId]) return true;
+                const first = map[Object.keys(map)[0]];
+                return !!(first && first.note);
+            }""", note_id)
+            if exists:
+                return False
+            body_text = (self._page.text_content("body") or "").strip()
+            unavailable_tokens = ("内容不存在", "已删除", "not found", "removed")
+            normalized = body_text.lower()
+            return any(token in normalized for token in unavailable_tokens)
+        except Exception:
+            return False
 
     # ===== Internal: Interaction helpers =====
 
@@ -1191,6 +1292,7 @@ class XhsClient:
             }""",
             timeout=15.0,
             desc="note (navigate)",
+            raise_on_timeout=True,
         )
 
     def _get_interact_state(self, note_id: str) -> dict:
@@ -1286,8 +1388,13 @@ class XhsClient:
             time.sleep(0.3)
         logger.warning("__INITIAL_STATE__ not found after %.1fs", timeout)
 
-    def _wait_for_data(self, js_condition: str, timeout: float = 15.0,
-                       desc: str = "data"):
+    def _wait_for_data(
+        self,
+        js_condition: str,
+        timeout: float = 15.0,
+        desc: str = "data",
+        raise_on_timeout: bool = False,
+    ):
         """Wait for a JS condition (returning truthy) to be met.
 
         Used to wait for Vue to asynchronously populate __INITIAL_STATE__
@@ -1303,6 +1410,8 @@ class XhsClient:
                 pass
             time.sleep(0.5)
         logger.warning("%s not ready after %.1fs", desc, timeout)
+        if raise_on_timeout:
+            raise DataFetchError(f"{desc} not ready after {timeout:.1f}s")
 
     def _human_wait(self, min_sec: float = 1.0, max_sec: float = 3.0):
         """Wait a random human-like interval."""

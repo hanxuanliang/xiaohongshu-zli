@@ -21,7 +21,7 @@
 - **话题** — 搜索话题标签
 - **互动** — 点赞/取消、收藏/取消、评论、删除笔记
 - **发布** — 发布图文笔记
-- **认证** — 自动提取 Chrome cookie，或扫码登录
+- **认证** — 自动提取 Chrome cookie，或扫码登录（终端二维码渲染）
 - **JSON 输出** — 所有数据命令支持 `--json`
 - **Token 自动缓存** — `xsec_token` 搜索后自动缓存，后续命令免手动传
 
@@ -99,7 +99,10 @@ XHS_SMOKE_POST_CONTENT="smoke content"
 # 自动从 Chrome 提取 cookie（推荐）
 xhs login
 
-# 手动提供 cookie 字符串
+# 强制使用二维码登录（用于排查登录问题）
+xhs login --qrcode
+
+# 手动提供 cookie 字符串（至少包含 a1 和 web_session）
 xhs login --cookie "a1=xxx; web_session=yyy"
 
 # 快速检查已保存的登录状态（不启动浏览器，不读取浏览器 cookie）
@@ -203,11 +206,12 @@ CLI (click) → XhsClient (camoufox 浏览器)
 
 ## 工作原理
 
-1. **认证** — 优先读取 `~/.xhs-cli/cookies.json`；未命中时通过 browser-cookie3 从本地 Chrome 提取 cookie，失败则 fallback 到扫码登录。
-2. **浏览** — 使用 camoufox 导航到真实页面，所有流量与正常用户浏览一致。
-3. **数据提取** — 从 `window.__INITIAL_STATE__` 提取结构化数据。
-4. **Token 缓存** — 搜索/Feed 后 `xsec_token` 自动缓存到 `~/.xhs-cli/token_cache.json`。
-5. **互动操作** — 点赞、收藏、评论通过点击真实 DOM 按钮实现。
+1. **认证** — 优先读取 `~/.xhs-cli/cookies.json`；未命中时通过 browser-cookie3 从本地 Chrome 提取 cookie，失败则 fallback 到扫码登录（终端半块字符二维码，`▀ ▄ █`）。
+2. **登录态校验** — 登录后会校验会话是否为有效非 guest 会话，并做 feed/search 可用性探活；探活失败会提示重新登录。
+3. **浏览** — 使用 camoufox 导航到真实页面，所有流量与正常用户浏览一致。
+4. **数据提取** — 从 `window.__INITIAL_STATE__` 提取结构化数据。
+5. **Token 缓存** — 搜索/Feed 后 `xsec_token` 自动缓存到 `~/.xhs-cli/token_cache.json`。
+6. **互动操作** — 点赞、收藏、评论通过点击真实 DOM 按钮实现。
 
 ## 作为 AI Agent Skill 使用
 
@@ -241,6 +245,8 @@ clawhub install xiaohongshu-cli
 
 - Cookie 存储在 `~/.xhs-cli/cookies.json`，权限 `0600`。
 - `xhs status` 只检查本地已保存 cookie，不会触发浏览器 cookie 提取。
+- `xhs login --cookie` 要求 cookie 至少包含 `a1` 和 `web_session`。
+- 登录后会自动做可用性探活；若会话仍为 guest/风控受限，会提示重新登录。
 - `xhs post` 可能要求额外登录创作平台（`https://creator.xiaohongshu.com`）。
 - 使用 headless Firefox，不会弹出浏览器窗口。
 - 首次运行需下载 camoufox 浏览器（`python -m camoufox fetch`）。

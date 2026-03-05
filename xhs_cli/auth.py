@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .exceptions import LoginError
 
@@ -22,9 +23,8 @@ COOKIE_FILE = CONFIG_DIR / "cookies.json"
 # need to copy-paste tokens manually after search.
 TOKEN_CACHE_FILE = CONFIG_DIR / "token_cache.json"
 
-# a1 is required for signing. web_session is needed for authenticated endpoints
-# but not for anonymous operations like search.
-REQUIRED_COOKIES = {"a1"}
+# a1 is required for signing; web_session is required for a stable logged-in session.
+REQUIRED_COOKIES = {"a1", "web_session"}
 
 
 def get_saved_cookie_string() -> str | None:
@@ -98,7 +98,7 @@ for name, loader in browsers:
     try:
         cj = loader(domain_name=".xiaohongshu.com")
         cookies = {c.name: c.value for c in cj if "xiaohongshu" in (c.domain or "")}
-        if "a1" in cookies:
+        if "a1" in cookies and "web_session" in cookies:
             print(json.dumps({"browser": name, "cookies": cookies}))
             sys.exit(0)
     except Exception:
@@ -143,9 +143,9 @@ print(json.dumps({"error": "no_cookies"}))
 def qrcode_login() -> str:
     """Login via QR code displayed to the user.
 
-    Opens xiaohongshu login page in camoufox (headless), captures the QR code
-    as a screenshot, opens it with the system image viewer, then polls for
-    login completion by checking cookies.
+    Opens xiaohongshu login page in camoufox (headless), tries to render QR
+    directly in terminal with half-block characters, and falls back to image
+    screenshot display when QR text cannot be extracted.
     """
     import tempfile
     import time
@@ -201,55 +201,21 @@ def qrcode_login() -> str:
                 timeout=20000,
             )
             time.sleep(3)
-
-        # Try to screenshot the QR code element directly
-        qr_selectors = [
-            '.qrcode-img',
-            'img[class*="qrcode"]',
-            'img[class*="qr-code"]',
-            '.login-container img',
-            'canvas[class*="qrcode"]',
-        ]
-
-        qr_path = Path(tempfile.mkdtemp()) / "xhs_qrcode.png"
-        qr_found = False
-
-        for sel in qr_selectors:
-            el = page.query_selector(sel)
-            if el:
-                try:
-                    el.screenshot(path=str(qr_path))
-                    qr_found = True
-                    break
-                except Exception:
-                    continue
-
-        # Fallback: screenshot the entire login modal or viewport
-        if not qr_found:
-            modal_selectors = [
-                '.login-container',
-                '[class*="login-modal"]',
-                '[class*="login-dialog"]',
-                '.modal-content',
-            ]
-            for sel in modal_selectors:
-                el = page.query_selector(sel)
-                if el:
-                    try:
-                        el.screenshot(path=str(qr_path))
-                        qr_found = True
-                        break
-                    except Exception:
-                        continue
-
-        # Last resort: full page screenshot
-        if not qr_found:
-            page.screenshot(path=str(qr_path), full_page=False)
-            qr_found = True
+        _ensure_qr_login_tab(page)
+        time.sleep(1.5)
 
         # Display QR code directly in the terminal
         print("\n📱 Scan the QR code below with the Xiaohongshu app:\n")
-        _display_image_in_terminal(qr_path)
+        qr_path = Path(tempfile.mkdtemp()) / "xhs_qrcode.png"
+        rendered = False
+        qr_text = _extract_qr_text_from_page(page)
+        if qr_text:
+            rendered = _display_qr_text_in_terminal(qr_text)
+            if not rendered:
+                logger.debug("qrcode package unavailable; falling back to image display")
+        if not rendered:
+            _capture_qr_image(page, qr_path)
+            _display_image_in_terminal(qr_path)
 
         # Record current web_session value BEFORE user scans.
         # The page may already have a stale web_session cookie from
@@ -273,14 +239,18 @@ def qrcode_login() -> str:
             }
 
             current_session = cookie_dict.get("web_session", "")
-            # Login is successful only when web_session is NEW or CHANGED
-            if current_session and current_session != initial_session:
+            # Login is successful when web_session changes, or page state
+            # indicates non-guest authenticated user.
+            if current_session and (
+                current_session != initial_session or _has_non_guest_user(page)
+            ):
                 print("✅ Login successful!")
                 cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
                 save_cookies(cookie_str)
                 # Clean up temp file
                 try:
-                    qr_path.unlink()
+                    if qr_path.exists():
+                        qr_path.unlink()
                 except Exception:
                     pass
                 return cookie_str
@@ -299,31 +269,379 @@ def _display_image_in_terminal(image_path):
     opening with the system viewer if the protocol is not supported.
     """
     import base64
+    import os
     import subprocess
     import sys
 
-    try:
-        with open(image_path, 'rb') as f:
-            image_data = base64.b64encode(f.read()).decode('ascii')
+    term_program = os.getenv("TERM_PROGRAM", "")
+    term = os.getenv("TERM", "")
+    supports_inline = (
+        term_program in {"iTerm.app", "WezTerm"}
+        or "kitty" in term
+        or bool(os.getenv("KITTY_WINDOW_ID"))
+    )
 
-        # iTerm2 / WezTerm inline image protocol
-        # ESC ] 1337 ; File=[args] : base64_data BEL
-        osc = f'\033]1337;File=inline=1;preserveAspectRatio=1;width=40:{image_data}\a'
-        sys.stdout.write(osc)
-        sys.stdout.write('\n')
-        sys.stdout.flush()
-    except Exception:
-        # Fallback: open with system image viewer
-        print(f"QR code saved to: {image_path}")
+    if supports_inline:
         try:
-            if sys.platform == 'darwin':
-                subprocess.Popen(['open', str(image_path)])
-            elif sys.platform == 'win32':
-                subprocess.Popen(['start', str(image_path)], shell=True)
-            else:
-                subprocess.Popen(['xdg-open', str(image_path)])
+            with open(image_path, 'rb') as f:
+                image_data = base64.b64encode(f.read()).decode('ascii')
+
+            # iTerm2 / WezTerm inline image protocol
+            # ESC ] 1337 ; File=[args] : base64_data BEL
+            osc = f'\033]1337;File=inline=1;preserveAspectRatio=1;width=40:{image_data}\a'
+            sys.stdout.write(osc)
+            sys.stdout.write('\n')
+            sys.stdout.flush()
+            return
         except Exception:
-            print(f"Please open manually: {image_path}")
+            pass
+
+    print(f"QR code saved to: {image_path}")
+    try:
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', str(image_path)])
+        elif sys.platform == 'win32':
+            subprocess.Popen(['start', str(image_path)], shell=True)
+        else:
+            subprocess.Popen(['xdg-open', str(image_path)])
+    except Exception:
+        print(f"Please open manually: {image_path}")
+
+
+def _capture_qr_image(page, qr_path: Path):
+    """Capture QR image from page as fallback when QR text is unavailable."""
+    best = _find_best_qr_element(page)
+    if best is not None:
+        try:
+            best.screenshot(path=str(qr_path))
+            return
+        except Exception:
+            pass
+
+    qr_selectors = [
+        ".qrcode-img",
+        'img[class*="qrcode"]',
+        'img[class*="qr-code"]',
+        ".login-container img",
+        'canvas[class*="qrcode"]',
+    ]
+    for sel in qr_selectors:
+        el = page.query_selector(sel)
+        if not el:
+            continue
+        try:
+            el.screenshot(path=str(qr_path))
+            return
+        except Exception:
+            continue
+
+    modal_selectors = [
+        ".login-container",
+        '[class*="login-modal"]',
+        '[class*="login-dialog"]',
+        ".modal-content",
+    ]
+    for sel in modal_selectors:
+        el = page.query_selector(sel)
+        if not el:
+            continue
+        try:
+            el.screenshot(path=str(qr_path))
+            return
+        except Exception:
+            continue
+
+    page.screenshot(path=str(qr_path), full_page=False)
+
+
+def _find_best_qr_element(page):
+    """Select the most probable QR image/canvas element on the page."""
+    try:
+        elements = page.query_selector_all("img, canvas")
+    except Exception:
+        return None
+
+    best = None
+    best_score = -10**12
+    for el in elements:
+        try:
+            meta = el.evaluate(
+                """(node) => {
+                    const rect = node.getBoundingClientRect();
+                    const width = rect.width || node.width || node.naturalWidth || 0;
+                    const height = rect.height || node.height || node.naturalHeight || 0;
+                    const src = node.src || node.getAttribute("src") || "";
+                    const id = node.id || "";
+                    const cls = node.className || "";
+                    return { width, height, src, id, cls };
+                }"""
+            )
+        except Exception:
+            continue
+
+        if not isinstance(meta, dict):
+            continue
+        width = float(meta.get("width", 0) or 0)
+        height = float(meta.get("height", 0) or 0)
+        if width < 120 or height < 120:
+            continue
+        ratio = max(width, height) / max(1.0, min(width, height))
+        if ratio > 1.35:
+            continue
+
+        sig = f"{meta.get('src', '')} {meta.get('id', '')} {meta.get('cls', '')}".lower()
+        score = width * height
+        if any(k in sig for k in ("qr", "qrcode", "scan", "code")):
+            score += 1_000_000
+        if any(k in sig for k in ("logo", "icon", "avatar", "favicon")):
+            score -= 1_000_000
+
+        if score > best_score:
+            best = el
+            best_score = score
+
+    return best
+
+
+def _extract_qr_text_from_page(page) -> str:
+    """Extract QR payload text/URL from page DOM/state if available."""
+    try:
+        qr_raw = page.evaluate(
+            """() => {
+                const values = [];
+                const push = (v) => {
+                    if (typeof v !== "string") return;
+                    const s = v.trim();
+                    if (!s || s.length < 8) return;
+                    values.push(s);
+                };
+
+                const attrs = ["src", "href", "data-url", "data-qr", "data-qrcode", "title"];
+                const selectors = [
+                    ".qrcode-img",
+                    'img[class*="qrcode"]',
+                    'img[class*="qr-code"]',
+                    '[class*="qrcode"]',
+                    '[class*="qr-code"]',
+                    'a[href*="qr"]',
+                ];
+                for (const sel of selectors) {
+                    for (const el of document.querySelectorAll(sel)) {
+                        for (const attr of attrs) {
+                            const v = el.getAttribute && el.getAttribute(attr);
+                            if (v) push(v);
+                        }
+                        if (el.textContent) push(el.textContent);
+                    }
+                }
+
+                const walk = (node, depth) => {
+                    if (!node || depth > 6) return;
+                    if (typeof node === "string") {
+                        push(node);
+                        return;
+                    }
+                    if (Array.isArray(node)) {
+                        for (const item of node) walk(item, depth + 1);
+                        return;
+                    }
+                    if (typeof node !== "object") return;
+                    for (const [k, v] of Object.entries(node)) {
+                        const key = String(k).toLowerCase();
+                        if (
+                            key.includes("qr")
+                            || key.includes("qrcode")
+                            || key.includes("code")
+                            || key.includes("url")
+                        ) {
+                            walk(v, depth + 1);
+                        } else if (depth < 2) {
+                            walk(v, depth + 1);
+                        }
+                    }
+                };
+
+                try { walk(window.__INITIAL_STATE__, 0); } catch(e) {}
+
+                const looksLikeQrUrl = (v) => {
+                    const s = String(v || "").toLowerCase();
+                    return (
+                        s.includes("qrcode") ||
+                        s.includes("qr_code") ||
+                        s.includes("qrlogin") ||
+                        s.includes("scan") ||
+                        s.includes("qr=") ||
+                        s.includes("code=")
+                    );
+                };
+
+                for (const v of values) {
+                    if (
+                        (v.startsWith("http://") || v.startsWith("https://")) &&
+                        looksLikeQrUrl(v)
+                    ) return v;
+                    const m = v.match(/[?&](?:url|redirect_url|qr|qrcode|qrcode_url)=([^&]+)/i);
+                    if (m && m[1]) {
+                        const decoded = decodeURIComponent(m[1]);
+                        if (looksLikeQrUrl(decoded)) return decoded;
+                    }
+                }
+                return "";
+            }"""
+        )
+    except Exception:
+        return ""
+
+    if not isinstance(qr_raw, str) or not qr_raw.strip():
+        return _extract_qr_text_from_best_element(page)
+    candidate = qr_raw.strip()
+    if candidate.startswith("data:image/"):
+        return ""
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        parsed = urlparse(candidate)
+        qs = parse_qs(parsed.query)
+        for key in ("url", "redirect_url", "qrcode", "qrcode_url", "qr"):
+            val = qs.get(key)
+            if val and isinstance(val, list) and val[0]:
+                return unquote(val[0])
+        if not _is_likely_qr_url(candidate):
+            return _extract_qr_text_from_best_element(page)
+        return candidate
+    return candidate
+
+
+def _is_likely_qr_url(url: str) -> bool:
+    """Heuristic filter to avoid homepage/logo URLs mistaken as QR payload."""
+    s = (url or "").lower()
+    if not (s.startswith("http://") or s.startswith("https://")):
+        return False
+    qr_markers = ("qrcode", "qr_code", "qrlogin", "scan", "qr=", "code=")
+    return any(marker in s for marker in qr_markers)
+
+
+def _extract_qr_text_from_best_element(page) -> str:
+    """Fallback: try extracting QR URL from the best candidate image/canvas element."""
+    best = _find_best_qr_element(page)
+    if best is None:
+        return ""
+    try:
+        raw = best.evaluate(
+            """(node) => {
+                const attrs = ["src", "href", "data-url", "data-qr", "data-qrcode", "title"];
+                for (const attr of attrs) {
+                    const v = node.getAttribute && node.getAttribute(attr);
+                    if (v && String(v).trim()) return String(v).trim();
+                }
+                return node.src || "";
+            }"""
+        )
+    except Exception:
+        return ""
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    candidate = raw.strip()
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        parsed = urlparse(candidate)
+        qs = parse_qs(parsed.query)
+        for key in ("url", "redirect_url", "qrcode", "qrcode_url", "qr"):
+            val = qs.get(key)
+            if val and isinstance(val, list) and val[0]:
+                return unquote(val[0])
+        if _is_likely_qr_url(candidate):
+            return candidate
+    return ""
+
+
+def _render_qr_half_blocks(matrix: list[list[bool]]) -> str:
+    """Render QR matrix using half-block characters (▀▄█)."""
+    if not matrix:
+        return ""
+
+    border = 2
+    width = len(matrix[0]) + border * 2
+    padded = [[False] * width for _ in range(border)]
+    for row in matrix:
+        padded.append(([False] * border) + row + ([False] * border))
+    padded.extend([[False] * width for _ in range(border)])
+
+    chars = {
+        (False, False): " ",
+        (True, False): "▀",
+        (False, True): "▄",
+        (True, True): "█",
+    }
+
+    lines = []
+    for y in range(0, len(padded), 2):
+        top = padded[y]
+        bottom = padded[y + 1] if y + 1 < len(padded) else [False] * width
+        line = "".join(chars[(top[x], bottom[x])] for x in range(width))
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _display_qr_text_in_terminal(qr_text: str) -> bool:
+    """Render QR text as terminal half-block art."""
+    try:
+        import qrcode
+    except ImportError:
+        return False
+
+    try:
+        qr = qrcode.QRCode(border=0)
+        qr.add_data(qr_text)
+        qr.make(fit=True)
+        print(_render_qr_half_blocks(qr.get_matrix()))
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_qr_login_tab(page):
+    """Switch to QR login tab if another login mode is active."""
+    selectors = [
+        'text=二维码登录',
+        'text=扫码登录',
+        'button:has-text("二维码")',
+        'button:has-text("扫码")',
+        '[role="tab"]:has-text("二维码")',
+        '[role="tab"]:has-text("扫码")',
+    ]
+    for sel in selectors:
+        el = page.query_selector(sel)
+        if not el:
+            continue
+        try:
+            el.click(force=True)
+            return
+        except Exception:
+            continue
+
+
+def _has_non_guest_user(page) -> bool:
+    """Best-effort check whether login page state shows authenticated user."""
+    try:
+        return bool(
+            page.evaluate(
+                """() => {
+                    const s = window.__INITIAL_STATE__ || {};
+                    const user = s.user || {};
+                    const userInfo =
+                        user.userInfo || user.currentUser || user.loginUser || {};
+                    if (userInfo && userInfo.guest === false) return true;
+                    const userPageData = user.userPageData || {};
+                    const basic =
+                        userPageData.basicInfo ||
+                        userPageData.basic_info ||
+                        user.basicInfo ||
+                        user.basic_info ||
+                        {};
+                    return !!(basic && basic.nickname);
+                }"""
+            )
+        )
+    except Exception:
+        return False
 
 
 def save_cookies(cookie_str: str):
@@ -334,7 +652,10 @@ def save_cookies(cookie_str: str):
     data = {"cookies": cookies}
 
     COOKIE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-    COOKIE_FILE.chmod(0o600)  # Owner-only read/write
+    try:
+        COOKIE_FILE.chmod(0o600)  # Owner-only read/write
+    except OSError:
+        logger.debug("Failed to set permissions on %s", COOKIE_FILE)
     logger.info("Cookies saved to %s", COOKIE_FILE)
 
 
