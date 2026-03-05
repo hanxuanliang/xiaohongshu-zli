@@ -1,194 +1,186 @@
-# xhs-cli 🍰
+# xhs-cli
 
-**English** | [中文](README_CN.md)
+**中文** | [English](README_EN.md)
 
-A command-line tool for [Xiaohongshu (小红书)](https://www.xiaohongshu.com) — search notes, view profiles, like, favorite, and comment, all from your terminal.
+小红书命令行工具 — 在终端中搜索笔记、查看主页、点赞、收藏、评论。
 
-## ✨ Features
+## 功能
 
-- 🔍 **Search** — search notes by keyword with rich table output
-- 📖 **Read** — view note content, stats, and comments
-- 👤 **User Profile** — view user info and stats
-- 📝 **User Posts** — list all notes published by a user
-- 🏠 **Feed** — get recommended content from explore page
-- 🏷️ **Topics** — search for topics and hashtags
-- ❤️ **Like / Unlike** — like or unlike notes
-- ⭐ **Favorite / Unfavorite** — collect or uncollect notes
-- 💬 **Comment** — post comments on notes
-- 🔐 **Auth** — auto-extract cookies from Chrome, or login via QR code
-- 📊 **JSON output** — `--json` flag for all data commands
-- 🔗 **Auto token** — `xsec_token` from search/feed results is cached and auto-resolved
+- **搜索** — 按关键词搜索笔记，Rich 表格展示
+- **阅读** — 查看笔记内容、数据、评论
+- **用户资料** — 查看用户信息、笔记、粉丝、关注
+- **推荐 Feed** — 获取探索页推荐内容
+- **话题** — 搜索话题标签
+- **互动** — 点赞/取消、收藏/取消、评论
+- **发布** — 发布图文笔记
+- **认证** — 自动提取 Chrome cookie，或扫码登录
+- **JSON 输出** — 所有数据命令支持 `--json`
+- **Token 自动缓存** — `xsec_token` 搜索后自动缓存，后续命令免手动传
 
-## 📋 What Can I Do?
+## 命令一览
 
-| Category | Commands | Description |
-|----------|----------|-------------|
-| 🔐 **Auth** | `login`, `logout`, `status`, `whoami` | Login, logout, check status, view profile |
-| 🔍 **Read** | `search`, `read`, `feed`, `topics` | Search notes, read details, explore feed, find topics |
-| 👤 **Users** | `user`, `user-posts`, `followers`, `following` | View profile, list posts/followers/following |
-| ❤️ **Engage** | `like`, `unlike`, `comment` | Like, unlike, comment on notes |
-| ⭐ **Favorites** | `favorite`, `unfavorite`, `favorites` | Favorite, unfavorite, list all favorites |
-| 📝 **Post** | `post` | Publish a new image note |
+| 分类 | 命令 | 说明 |
+|------|------|------|
+| Auth | `login`, `logout`, `status`, `whoami` | 登录、退出、状态检查、查看个人资料 |
+| Read | `search`, `read`, `feed`, `topics` | 搜索笔记、阅读详情、推荐 Feed、搜索话题 |
+| Users | `user`, `user-posts`, `followers`, `following` | 查看资料、列出笔记/粉丝/关注 |
+| Engage | `like`, `unlike`, `comment` | 点赞、取消点赞、评论 |
+| Favorites | `favorite`, `unfavorite`, `favorites` | 收藏、取消收藏、查看收藏列表 |
+| Post | `post` | 发布图文笔记 |
 
-> All data commands support `--json` for raw JSON output. `xsec_token` is auto-cached and auto-resolved.
+> 所有数据命令支持 `--json` 输出。`xsec_token` 自动缓存，无需手动传递。
 
-## 🏗️ Architecture
+## 安装
 
-```
-CLI (click) → XhsClient (camoufox browser)
-                  ↓ navigate to real pages
-              window.__INITIAL_STATE__ → extract structured data
-```
-
-Uses [camoufox](https://github.com/nicochichat/camoufox) (anti-fingerprint Firefox) to browse Xiaohongshu like a real user. Data is extracted from the page's `window.__INITIAL_STATE__` — completely indistinguishable from normal browsing.
-
-## 📦 Installation
-
-Requires Python 3.8+ and [uv](https://docs.astral.sh/uv/).
+需要 Python 3.8+。
 
 ```bash
-# Clone and install
+# 推荐：使用 uv
+uv tool install xhs-cli
+
+# 或使用 pipx
+pipx install xhs-cli
+```
+
+安装后需要下载 camoufox 浏览器：
+
+```bash
+python -m camoufox fetch
+```
+
+<details>
+<summary>从源码安装（开发用）</summary>
+
+```bash
 git clone git@github.com:jackwener/xhs-cli.git
 cd xhs-cli
 uv sync
-
-# Install camoufox browser
 uv run python -m camoufox fetch
 ```
 
-## 🚀 Usage
+</details>
 
-### Login
+## 使用
 
-```bash
-# Auto-extract cookies from Chrome (recommended)
-uv run xhs login
-
-# Or provide cookie string manually
-uv run xhs login --cookie "a1=xxx; web_session=yyy"
-
-# Quick login check (no browser needed)
-uv run xhs status
-
-# Show full profile info
-uv run xhs whoami
-
-# Logout
-uv run xhs logout
-```
-
-### Search
+### 登录
 
 ```bash
-# Search with rich table output
-uv run xhs search "咖啡"
+# 自动从 Chrome 提取 cookie（推荐）
+xhs login
 
-# JSON output
-uv run xhs search "咖啡" --json
+# 手动提供 cookie 字符串
+xhs login --cookie "a1=xxx; web_session=yyy"
+
+# 快速检查登录状态（不启动浏览器）
+xhs status
+
+# 查看个人资料
+xhs whoami
+xhs whoami --json
+
+# 退出登录
+xhs logout
 ```
 
-### Read Note
+### 搜索
 
 ```bash
-# View note (xsec_token auto-resolved from search cache)
-uv run xhs read <note_id>
-
-# Include comments
-uv run xhs read <note_id> --comments
-
-# Provide xsec_token manually if needed
-uv run xhs read <note_id> --xsec-token <token>
-
-# JSON output
-uv run xhs read <note_id> --json
+xhs search "咖啡"
+xhs search "咖啡" --json
 ```
 
-### User Profile & Posts
+### 阅读笔记
 
 ```bash
-# View user profile (use internal user_id, not Red ID)
-uv run xhs user <user_id>
-uv run xhs user <user_id> --json
+# 查看笔记（xsec_token 从缓存自动解析）
+xhs read <note_id>
 
-# List user's published notes
-uv run xhs user-posts <user_id>
-uv run xhs user-posts <user_id> --json
+# 包含评论
+xhs read <note_id> --comments
+
+# 手动指定 xsec_token
+xhs read <note_id> --xsec-token <token>
 ```
 
-### Feed & Topics
+### 用户
 
 ```bash
-# Get recommended explore feed
-uv run xhs feed
-uv run xhs feed --json
+# 查看用户资料（使用内部 user_id，非小红书号）
+xhs user <user_id>
 
-# Search topics/hashtags
-uv run xhs topics "咖啡"
-uv run xhs topics "咖啡" --json
+# 列出用户笔记
+xhs user-posts <user_id>
+
+# 粉丝 / 关注
+xhs followers <user_id>
+xhs following <user_id>
 ```
 
-### Interactions
+### 推荐 & 话题
 
 ```bash
-# Like / Unlike (xsec_token auto-resolved)
-uv run xhs like <note_id>
-uv run xhs like <note_id> --undo
-
-# Favorite / Unfavorite
-uv run xhs favorite <note_id>
-uv run xhs favorite <note_id> --undo
-
-# Comment
-uv run xhs comment <note_id> "好棒！"
+xhs feed
+xhs topics "旅行"
 ```
 
-### Options
+### 互动
 
 ```bash
-# Enable debug logging
-uv run xhs -v search "咖啡"
+# 点赞 / 取消（xsec_token 自动解析）
+xhs like <note_id>
+xhs like <note_id> --undo
 
-# Show help
-uv run xhs --help
-uv run xhs search --help
+# 收藏 / 取消
+xhs favorite <note_id>
+xhs favorite <note_id> --undo
+
+# 评论
+xhs comment <note_id> "好棒！"
+
+# 查看收藏列表
+xhs favorites
+xhs favorites --max 10
 ```
 
-## 📁 Project Structure
+### 发布笔记
 
-```
-xhs-cli/
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Lock file
-├── README.md
-├── LICENSE
-└── xhs_cli/
-    ├── __init__.py         # Package version
-    ├── cli.py              # Click CLI commands
-    ├── client.py           # Camoufox browser client
-    ├── auth.py             # Cookie extraction + QR login + token cache
-    └── exceptions.py       # Custom exceptions
+```bash
+xhs post "标题" --image photo1.jpg --image photo2.jpg --content "正文内容"
 ```
 
-## 🔧 How It Works
+### 其他
 
-1. **Authentication**: Cookies are extracted from your local Chrome browser via [browser-cookie3](https://github.com/nicochichat/browsercookie). Falls back to QR code login if extraction fails.
+```bash
+xhs --version
+xhs -v search "咖啡"   # 调试日志
+xhs --help
+```
 
-2. **Browsing**: Each operation navigates to the real Xiaohongshu page using camoufox (a fingerprint-resistant Firefox fork). This makes all traffic look like normal user browsing.
+## 架构
 
-3. **Data Extraction**: Structured data is pulled from `window.__INITIAL_STATE__`, which is the same data React/Vue uses to render the page.
+```
+CLI (click) → XhsClient (camoufox 浏览器)
+                  ↓ 导航到真实页面
+              window.__INITIAL_STATE__ → 提取结构化数据
+```
 
-4. **Token Caching**: After search/feed/user-posts, `xsec_token` is automatically cached to `~/.xhs-cli/token_cache.json`. Subsequent commands auto-resolve tokens — no manual copy-paste needed.
+使用 [camoufox](https://github.com/daijro/camoufox)（反指纹 Firefox）像真实用户一样浏览小红书。数据从页面的 `window.__INITIAL_STATE__` 中提取，与正常浏览完全一致。
 
-5. **Interactions**: Like, favorite, and comment work by finding and clicking the actual DOM buttons — exactly as a real user would.
+## 工作原理
 
-## ⚠️ Notes
+1. **认证** — 通过 browser-cookie3 从本地 Chrome 提取 cookie，失败则 fallback 到扫码登录。
+2. **浏览** — 使用 camoufox 导航到真实页面，所有流量与正常用户浏览一致。
+3. **数据提取** — 从 `window.__INITIAL_STATE__` 提取结构化数据。
+4. **Token 缓存** — 搜索/Feed 后 `xsec_token` 自动缓存到 `~/.xhs-cli/token_cache.json`。
+5. **互动操作** — 点赞、收藏、评论通过点击真实 DOM 按钮实现。
 
-- Cookies are stored in `~/.xhs-cli/cookies.json` with `0600` permissions.
-- Token cache is stored in `~/.xhs-cli/token_cache.json`.
-- The tool uses headless Firefox via camoufox — no browser window is shown.
-- First run may be slower as camoufox downloads its browser binary.
-- User profile lookup requires the internal user_id (hex format), not the Red ID (numeric).
+## 注意事项
 
-## 📄 License
+- Cookie 存储在 `~/.xhs-cli/cookies.json`，权限 `0600`。
+- 使用 headless Firefox，不会弹出浏览器窗口。
+- 首次运行需下载 camoufox 浏览器（`python -m camoufox fetch`）。
+- 用户资料查询需要内部 user_id（十六进制），不是小红书号。
+
+## License
 
 Apache License 2.0
