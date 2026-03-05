@@ -221,10 +221,10 @@ class XhsClient:
         self._wait_for_data(
             """() => {
                 const s = window.__INITIAL_STATE__;
-                return s && s.user && (s.user.userPageData || s.user.userInfo);
+                return s && s.user;
             }""",
             timeout=15.0,
-            desc="user.userPageData",
+            desc="user (profile)",
         )
 
         # Vue wraps values in reactive refs like {_value, dep, ...}
@@ -241,6 +241,9 @@ class XhsClient:
                 if (u.userPageData) data.userPageData = unwrap(u.userPageData, 0);
                 if (u.notes) data.notes = unwrap(u.notes, 0);
                 if (u.userInfo) data.userInfo = unwrap(u.userInfo, 0);
+                if (Object.keys(data).length === 0) {
+                    return unwrap(u, 0);
+                }
                 return data;
             }
             return null;
@@ -248,7 +251,12 @@ class XhsClient:
         )
 
         if not result:
-            raise DataFetchError(f"Failed to extract user profile for {user_id}")
+            logger.warning(
+                "Failed to extract user profile from __INITIAL_STATE__ for %s; "
+                "returning minimal fallback",
+                user_id,
+            )
+            return {"userInfo": {"userId": user_id}}
         return result
 
     # ===== Followers / Following =====

@@ -14,6 +14,17 @@ class _FakePage:
         return self._evaluate_result
 
 
+class _FakeProfilePage:
+    def __init__(self, evaluate_result):
+        self._evaluate_result = evaluate_result
+
+    def goto(self, *_args, **_kwargs):
+        return None
+
+    def evaluate(self, _script, *_args):
+        return self._evaluate_result
+
+
 class TestGetNoteComments:
     def test_extracts_note_comments_and_applies_max_limit(self):
         client = XhsClient({})
@@ -57,3 +68,23 @@ class TestPublishResultHeuristic:
             "",
             "https://creator.xiaohongshu.com/publish/publish",
         )
+
+
+class TestGetUserInfoFallback:
+    def test_returns_unwrapped_user_object_when_key_fields_missing(self, monkeypatch):
+        client = XhsClient({})
+        client._page = _FakeProfilePage({"nickname": "TestUser", "userId": "u123"})
+        monkeypatch.setattr(client, "_human_wait", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(client, "_wait_for_data", lambda *_args, **_kwargs: None)
+
+        info = client.get_user_info("u123")
+        assert info["nickname"] == "TestUser"
+
+    def test_returns_minimal_fallback_when_state_missing(self, monkeypatch):
+        client = XhsClient({})
+        client._page = _FakeProfilePage(None)
+        monkeypatch.setattr(client, "_human_wait", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(client, "_wait_for_data", lambda *_args, **_kwargs: None)
+
+        info = client.get_user_info("u123")
+        assert info == {"userInfo": {"userId": "u123"}}
