@@ -128,12 +128,13 @@ class TestLoginCookieValidation:
         called = {"cleared": False}
         monkeypatch.setattr(cli_module, "get_cookie_string", lambda: "a1=abc")
         monkeypatch.setattr(cli_module, "_verify_cookies", lambda _cookie_dict: False)
+        monkeypatch.setattr(cli_module, "_probe_session_usability", lambda _cookie_dict: True)
         monkeypatch.setattr(
             cli_module,
             "clear_cookies",
             lambda: called.__setitem__("cleared", True) or ["cookies.json"],
         )
-        monkeypatch.setattr(cli_module, "qrcode_login", lambda: "a1=new")
+        monkeypatch.setattr(cli_module, "qrcode_login", lambda: "a1=new; web_session=new")
 
         result = runner.invoke(cli, ["login"])
         assert result.exit_code == 0
