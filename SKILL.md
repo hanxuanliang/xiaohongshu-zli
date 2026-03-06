@@ -1,6 +1,14 @@
 ---
 name: xhs-cli
-description: Xiaohongshu (小红书) CLI — search, read, like, favorite, comment from the terminal
+description: CLI skill for Xiaohongshu (小红书, RedNote, XHS) to search notes, read posts, browse profiles, like, favorite, comment, and publish from the terminal
+author: jackwener
+version: "1.0.0"
+tags:
+  - xhs
+  - xiaohongshu
+  - rednote
+  - social-media
+  - cli
 ---
 
 # xhs-cli Skill
