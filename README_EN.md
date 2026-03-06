@@ -222,7 +222,6 @@ xhs-cli ships with a [`SKILL.md`](./SKILL.md) that teaches AI agents how to use 
 ### Claude Code / Antigravity
 
 ```bash
-# Recommended: install the skill directly from GitHub
 npx skills add jackwener/xhs-cli
 
 # Clone into your project's skills directory
