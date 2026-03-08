@@ -154,3 +154,10 @@ xhs read <note_id> --comments --json
 - Error messages are prefixed with ❌
 - Login-required commands show clear instruction to run `xhs login`
 - `xsec_token` is auto-resolved from cache; manual `--xsec-token` available as fallback
+
+## Safety Notes
+
+- Do not ask users to share raw cookie values in chat logs.
+- Prefer auto-extraction via `xhs login` over manual cookie input.
+- If auth fails, ask the user to re-login via `xhs login`.
+
