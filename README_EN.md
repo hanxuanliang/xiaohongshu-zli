@@ -21,7 +21,7 @@ A command-line tool for [Xiaohongshu (小红书)](https://www.xiaohongshu.com) �
 - **Topics** — search for topics and hashtags
 - **Engage** — like/unlike, favorite/unfavorite, comment, delete
 - **Post** — publish image notes
-- **Auth** — auto-extract cookies from Chrome, or login via QR code (terminal-rendered)
+- **Auth** — auto-extract cookies from Chrome, or browser-assisted QR login (terminal-rendered)
 - **JSON output** — `--json` flag for all data commands
 - **Auto token** — `xsec_token` is cached and auto-resolved
 
@@ -208,7 +208,7 @@ Uses [camoufox](https://github.com/daijro/camoufox) (anti-fingerprint Firefox) t
 
 ## How It Works
 
-1. **Authentication** — First reads `~/.xhs-cli/cookies.json`; if missing, extracts cookies from local Chrome via browser-cookie3. Falls back to QR code login if extraction fails (terminal half-block rendering with `▀ ▄ █`).
+1. **Authentication** — First reads `~/.xhs-cli/cookies.json`; if missing, extracts cookies from local Chrome via browser-cookie3. `xhs login --qrcode` uses browser-assisted QR login with terminal half-block rendering (`▀ ▄ █`).
 2. **Session Validation** — After login, the CLI verifies that the session is non-guest and probes feed/search usability. If probe fails, it asks for re-login.
 3. **Browsing** — Each operation navigates to real pages using camoufox, making all traffic look like normal user browsing.
 4. **Data Extraction** — Structured data is pulled from `window.__INITIAL_STATE__`.

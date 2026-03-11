@@ -7,10 +7,12 @@ import os
 import stat
 
 from xhs_cli.auth import (
+    _browser_response_payload,
     _dict_to_cookie_str,
     _has_required_cookies,
-    _is_likely_qr_url,
+    _normalize_browser_cookies,
     _render_qr_half_blocks,
+    _unwrap_browser_response_payload,
     clear_cookies,
     cookie_str_to_dict,
     get_cookie_string,
@@ -205,9 +207,42 @@ class TestQrHalfBlockRender:
         assert "▄" in _render_qr_half_blocks(bottom_only)
 
 
-class TestQrUrlHeuristic:
-    def test_accepts_qr_login_url(self):
-        assert _is_likely_qr_url("https://example.com/qrlogin?qrcode=abc")
+class TestBrowserAssistedQrHelpers:
+    def test_normalize_browser_cookies_filters_domain_and_name(self):
+        raw = [
+            {"name": "a1", "value": "cookie-a1", "domain": ".xiaohongshu.com"},
+            {"name": "web_session", "value": "cookie-session", "domain": ".xiaohongshu.com"},
+            {"name": "ignored", "value": "x", "domain": ".xiaohongshu.com"},
+            {"name": "webId", "value": "wrong-domain", "domain": ".example.com"},
+        ]
+        assert _normalize_browser_cookies(raw) == {
+            "a1": "cookie-a1",
+            "web_session": "cookie-session",
+        }
 
-    def test_rejects_homepage_url(self):
-        assert not _is_likely_qr_url("https://www.xiaohongshu.com/")
+    def test_unwrap_browser_response_payload_prefers_data_envelope(self):
+        payload = {"success": True, "data": {"url": "https://example.com/qr"}}
+        assert _unwrap_browser_response_payload(payload) == {"url": "https://example.com/qr"}
+
+    def test_browser_response_payload_rejects_non_json_dict(self):
+        class _Response:
+            url = "https://www.xiaohongshu.com/api/sns/web/v1/login/qrcode/create"
+
+            def json(self):
+                return ["not", "a", "dict"]
+
+        import pytest
+
+        with pytest.raises(Exception, match="unexpected payload"):
+            _browser_response_payload(_Response())
+
+class TestQrCodeLogin:
+    def test_qrcode_login_delegates_to_browser_assisted_flow(self, monkeypatch):
+        monkeypatch.setattr(
+            "xhs_cli.auth._browser_assisted_qrcode_login",
+            lambda: "a1=browser; web_session=browser-session",
+        )
+
+        from xhs_cli.auth import qrcode_login
+
+        assert qrcode_login() == "a1=browser; web_session=browser-session"

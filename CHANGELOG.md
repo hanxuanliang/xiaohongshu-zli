@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.4 - 2026-03-11
+
+### Changed
+
+- Reworked `xhs login --qrcode` to use a browser-assisted network-response flow.
+- Removed the legacy DOM/screenshot-based QR extraction path.
+- Synced README and README_EN to the current QR login behavior.
+
+### Validation
+
+- `python -m compileall xhs_cli` passes.
+- `uv run pytest tests/test_auth.py tests/test_cli.py` passes (`61 passed`).
+
 ## v0.1.2 - 2026-03-06
 
 ### Added
@@ -16,12 +29,12 @@ All notable changes to this project will be documented in this file.
 - Strengthened cookie requirements for saved/manual auth:
   - Required cookies are now `a1` + `web_session`.
 - Improved QR login robustness:
-  - Force switch to QR login tab when possible.
-  - Better QR payload extraction heuristics to avoid homepage/logo false matches.
-  - Better QR fallback element selection for screenshots.
+  - Switched `xhs login --qrcode` to a browser-assisted network-response flow.
+  - Export QR URL from `login/qrcode/create` instead of scraping page DOM.
+  - Export session cookies after `login/qrcode/status` instead of guessing from page state.
 - Improved login success detection:
   - Treat guest sessions as invalid.
-  - Accept non-guest page state as a login success signal (not only session cookie change).
+  - Wait for post-login browser session stabilization before persisting cookies.
 - Improved operation reliability:
   - Tightened success criteria for publish/comment/delete flows.
   - Added strict data-wait timeout path to reduce silent empty results.

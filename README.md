@@ -24,7 +24,7 @@
 - **话题** — 搜索话题标签
 - **互动** — 点赞/取消、收藏/取消、评论、删除笔记
 - **发布** — 发布图文笔记
-- **认证** — 自动提取 Chrome cookie，或扫码登录（终端二维码渲染）
+- **认证** — 自动提取 Chrome cookie，或 browser-assisted 扫码登录（终端二维码渲染）
 - **JSON 输出** — 所有数据命令支持 `--json`
 - **Token 自动缓存** — `xsec_token` 搜索后自动缓存，后续命令免手动传
 
@@ -209,7 +209,7 @@ CLI (click) → XhsClient (camoufox 浏览器)
 
 ## 工作原理
 
-1. **认证** — 优先读取 `~/.xhs-cli/cookies.json`；未命中时通过 browser-cookie3 从本地 Chrome 提取 cookie，失败则 fallback 到扫码登录（终端半块字符二维码，`▀ ▄ █`）。
+1. **认证** — 优先读取 `~/.xhs-cli/cookies.json`；未命中时通过 browser-cookie3 从本地 Chrome 提取 cookie。`xhs login --qrcode` 使用 browser-assisted 扫码登录，并在终端渲染二维码（`▀ ▄ █`）。
 2. **登录态校验** — 登录后会校验会话是否为有效非 guest 会话，并做 feed/search 可用性探活；探活失败会提示重新登录。
 3. **浏览** — 使用 camoufox 导航到真实页面，所有流量与正常用户浏览一致。
 4. **数据提取** — 从 `window.__INITIAL_STATE__` 提取结构化数据。
