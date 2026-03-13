@@ -134,15 +134,7 @@ class XhsClient:
         ]
         self._page.context.add_cookies(cookies)
 
-        # Navigate to homepage to establish session
-        self._goto(
-            "https://www.xiaohongshu.com",
-            timeout=20000,
-            wait_min=1,
-            wait_max=2,
-            context="establishing browser session",
-        )
-        logger.info("Browser ready.")
+        logger.info("Browser ready (lazy navigation — each command navigates on its own).")
 
     def close(self):
         """Shut down the browser."""
@@ -235,7 +227,7 @@ class XhsClient:
                 return s && s.note && s.note.noteDetailMap
                     && Object.keys(s.note.noteDetailMap).length > 0;
             }""",
-            timeout=15.0,
+            timeout=25.0,
             desc="note.noteDetailMap",
             raise_on_timeout=True,
         )
@@ -749,7 +741,7 @@ class XhsClient:
                 if (s.sidebar && s.sidebar.user) return true;
                 return false;
             }""",
-            timeout=10.0,
+            timeout=25.0,
             desc="user info",
             raise_on_timeout=True,
         )
@@ -1488,8 +1480,36 @@ class XhsClient:
         if reason:
             raise LoginError(f"Blocked by security verification while {context}: {reason}")
 
+    def _ensure_initial_state(self):
+        """Ensure __INITIAL_STATE__ is available on window.
+
+        Camoufox may skip inline <script> execution. If the state is missing
+        but present in a script tag, eval it manually.
+        """
+        try:
+            has_state = self._page.evaluate(
+                "() => window.__INITIAL_STATE__ !== undefined"
+                " && window.__INITIAL_STATE__ !== null"
+            )
+            if has_state:
+                return
+            self._page.evaluate("""() => {
+                const scripts = document.querySelectorAll('script');
+                for (const s of scripts) {
+                    const text = s.textContent || '';
+                    if (text.includes('__INITIAL_STATE__')) {
+                        eval(text);
+                        return;
+                    }
+                }
+            }""")
+            logger.debug("Manually eval'd __INITIAL_STATE__ from inline script.")
+        except Exception as e:
+            logger.debug("_ensure_initial_state failed: %s", e)
+
     def _wait_for_initial_state(self, timeout: float = 10.0):
         """Wait for window.__INITIAL_STATE__ to be populated."""
+        self._ensure_initial_state()
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -1518,6 +1538,7 @@ class XhsClient:
         Used to wait for Vue to asynchronously populate __INITIAL_STATE__
         sub-keys after initial page load.
         """
+        self._ensure_initial_state()
         start = time.time()
         while time.time() - start < timeout:
             try:
