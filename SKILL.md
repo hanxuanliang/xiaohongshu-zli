@@ -1,6 +1,6 @@
 ---
 name: xhs-cli
-description: CLI skill for Xiaohongshu (小红书, RedNote, XHS) to search notes, read posts, browse profiles, like, favorite, comment, and publish from the terminal
+description: "(LEGACY — use xiaohongshu-cli instead) CLI skill for Xiaohongshu (小红书, RedNote, XHS) to search notes, read posts, browse profiles, like, favorite, comment, and publish from the terminal"
 author: jackwener
 version: "1.0.0"
 tags:
@@ -11,6 +11,12 @@ tags:
   - social-media
   - cli
 ---
+
+> [!WARNING]
+> **This skill is superseded by [xiaohongshu-cli](https://github.com/jackwener/xiaohongshu-cli).**
+> `xiaohongshu-cli` uses a reverse-engineered API, runs faster, and is actively maintained.
+> This package (`xhs-cli`) uses a headless browser approach and is kept for legacy use only.
+> **New users and agents should install `xiaohongshu-cli` instead.**
 
 # xhs-cli Skill
 
