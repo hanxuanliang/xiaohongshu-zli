@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "xhs-cli"
+name = "xhz-cli"
 version = "0.1.4"
 description = "A CLI for Xiaohongshu (小红书) — search, read notes, view profiles"
 readme = "README.md"
@@ -40,7 +40,7 @@ Repository = "https://github.com/jackwener/xhs-cli"
 Issues = "https://github.com/jackwener/xhs-cli/issues"
 
 [project.scripts]
-xhs = "xhs_cli.cli:cli"
+xhz = "xhs_cli.cli:cli"
 
 [dependency-groups]
 dev = [
@@ -54,6 +54,12 @@ markers = [
     "live_mutation: integration tests that may mutate account state (like/favorite/comment/post)",
 ]
 addopts = "-m 'not integration'"
+
+[tool.hatch.build.targets.wheel]
+packages = ["xhs_cli"]
+
+[tool.hatch.build.force-include]
+"SKILL.md" = "xhs_cli/SKILL.md"
 
 [tool.ruff]
 line-length = 100
