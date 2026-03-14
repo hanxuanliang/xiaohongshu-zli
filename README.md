@@ -220,29 +220,30 @@ CLI (click) → XhsClient (camoufox 浏览器)
 
 xhs-cli 自带 [`SKILL.md`](./SKILL.md)，让 AI Agent 能自动学习并使用本工具。
 
-### Claude Code / Antigravity
+### [Skills CLI](https://github.com/vercel-labs/skills)（推荐）
 
 ```bash
-# 克隆到项目的 skills 目录
+npx skills add jackwener/xhs-cli
+```
+
+| 参数 | 说明 |
+| --- | --- |
+| `-g` | 全局安装（用户级别，跨项目共享） |
+| `-a claude-code` | 指定目标 Agent |
+| `-y` | 非交互模式 |
+
+### 手动安装
+
+```bash
 mkdir -p .agents/skills
 git clone git@github.com:jackwener/xhs-cli.git .agents/skills/xhs-cli
-
-# 或者只复制 SKILL.md
-curl -o .agents/skills/xhs-cli/SKILL.md \
-  https://raw.githubusercontent.com/jackwener/xhs-cli/main/SKILL.md
 ```
 
 添加后，支持 `.agents/skills/` 的 AI Agent 会自动发现并使用 xhs-cli 命令。
 
-### OpenClaw / ClawHub
+### ~~OpenClaw / ClawHub~~（已过时）
 
-官方支持 [OpenClaw](https://openclaw.ai) 和 [ClawHub](https://docs.openclaw.ai/tools/clawhub) 生态。通过 ClawHub 安装：
-
-```bash
-clawhub install xiaohongshu-cli
-```
-
-安装后即可在 OpenClaw 中直接使用所有 xhs-cli 命令。
+> ⚠️ ClawHub 安装方式已过时，不再支持。请使用上方的 Skills CLI 或手动安装。
 
 ## 注意事项
 
